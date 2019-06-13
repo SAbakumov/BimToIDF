@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Command">
+    <Text>Command BIMToIDF</Text>
+    <Description>Some description for BIMToIDF</Description>
+    <Assembly>BIMToIDF.dll</Assembly>
+    <FullClassName>BIMToIDF.Command</FullClassName>
+    <ClientId>689d0674-2ee5-4aa4-8300-476ea40ca309</ClientId>
+    <VendorId>com.typepad.thebuildingcoder</VendorId>
+    <VendorDescription>The Building Coder, http://thebuildingcoder.typepad.com</VendorDescription>
+  </AddIn>
+  <AddIn Type="Application">
+    <Name>Application BIMToIDF</Name>
+    <Assembly>BIMToIDF.dll</Assembly>
+    <FullClassName>BIMToIDF.App</FullClassName>
+    <ClientId>a4f78463-2bca-4a02-8ef1-b1220feeb588</ClientId>
+    <VendorId>com.typepad.thebuildingcoder</VendorId>
+    <VendorDescription>The Building Coder, http://thebuildingcoder.typepad.com</VendorDescription>
+  </AddIn>
+</RevitAddIns>

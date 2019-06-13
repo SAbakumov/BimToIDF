@@ -1,0 +1,9 @@
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csprojAssemblyReference.cache
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.CoreCompileInputs.cache
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\bin\Debug\BIMToIDF.dll
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\bin\Debug\BIMToIDF.pdb
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\bin\Debug\IDFObjects.dll
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\bin\Debug\IDFObjects.pdb
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.CopyComplete
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.dll
+C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.pdb
