@@ -24,6 +24,7 @@ namespace BIMToIDF
           ref string message,
           ElementSet elements)
         {
+            System.Windows.Forms.Application.CurrentCulture = System.Globalization.CultureInfo.CreateSpecificCulture("en-US");
             UIApplication uiapp = commandData.Application;
             UIDocument uidoc = uiapp.ActiveUIDocument;
             Autodesk.Revit.ApplicationServices.Application app = uiapp.Application;
@@ -31,7 +32,14 @@ namespace BIMToIDF
             string path = Environment.CurrentDirectory + "/Data/";
 
             List<List<Utility.StructureFloor>> sampledData = GetWallsAndFloorsAndCeilingsFromMasses(doc);
-
+            foreach (List<Utility.StructureFloor>  sample in sampledData)
+            {
+                IDFFile.IDFFile WrittenIDFFile = new IDFFile.IDFFile();
+                WrittenIDFFile = Utility.AssignIDFFileParameters(WrittenIDFFile, sample);
+                string fullFileName = "C:/Documents/TestFile_"+sampledData.IndexOf(sample)+".idf" ;
+                WrittenIDFFile.GenerateOutput(false, "Annual");
+                File.WriteAllLines(fullFileName, WrittenIDFFile.WriteFile());
+            }
             return Result.Succeeded;
         }
         public static List<List<Utility.StructureFloor>> GetWallsAndFloorsAndCeilingsFromMasses(Document doc)
@@ -152,10 +160,21 @@ namespace BIMToIDF
                 foreach (Tuple<double, IDFFile.XYZList> ElementCoordinates in Element)
                 {
                     IDFFile.Zone checkZone = AllZonesPerFloor.listZones[numFloor];
-                    IDFFile.BuildingSurface ElementSurface = new IDFFile.BuildingSurface(AllZonesPerFloor.listZones[1], ElementCoordinates.Item2, ElementCoordinates.Item1, Type);
-                    ElementSurface.ConstructionName = "General_Floor_Ceiling";
-                    ElementSurface.OutsideCondition = "Zone";
-                    ElementSurface.OutsideObject = "Zone_numFloor_" + numFloor;
+                    IDFFile.BuildingSurface ElementSurface = new IDFFile.BuildingSurface(AllZonesPerFloor.listZones[numFloor], ElementCoordinates.Item2, ElementCoordinates.Item1, Type);
+                    if( Type == IDFFile.SurfaceType.Wall)
+                {
+                        ElementSurface.ConstructionName = "Wall ConcreteBlock";
+                    }
+                    if (Type == IDFFile.SurfaceType.Floor)
+                {
+                        ElementSurface.ConstructionName = "Slab_Floor";
+                    }
+                    if (Type == IDFFile.SurfaceType.Roof)
+                {
+                        ElementSurface.ConstructionName = "General_Floor_Ceiling";
+                    }
+
+                    //ElementSurface.OutsideObject = "Zone_" + numFloor;
                     ElementSurface.SunExposed = "NoSun";
                     ElementSurface.WindExposed = "NoWind";
                     ElementSurface.zone.CalcAreaVolumeHeatCapacity();
@@ -176,11 +195,25 @@ namespace BIMToIDF
                 }
                 numFloor++;
             }
+            if (Type == IDFFile.SurfaceType.Wall)
+            {
+                foreach (StructureFloor floor in AllItemsPerStructure)
+                {
+            
+                        floor.FloorWalls[0].zone.building.AddZone(floor.FloorWalls[0].zone);
+                        floor.FloorWalls[0].zone.building.GeneratePeopleLightingElectricEquipment();
+                        floor.FloorWalls[0].zone.building.GenerateInfiltraitionAndVentillation();
+
+                }
+                AllItemsPerStructure[0].FloorWalls[0].zone.building.GenerateHVAC(true, false, false);
+
+            }
+
             return AllItemsPerStructure;
         }
         public static IDFFile.ZoneList InitializeBuildingFromInput( InputData userData)
         {
-            IDFFile.ZoneList ListOfZonesPerFloor = new IDFFile.ZoneList("Shape");
+            IDFFile.ZoneList ListOfZonesPerFloor = new IDFFile.ZoneList("Office");
 
 
 
@@ -193,32 +226,40 @@ namespace BIMToIDF
             double[] gWindow = BuildingConstructionData["gWindow"];
             double[] cCOP = BuildingConstructionData["CCOP"];
             double[] BEFF = BuildingConstructionData["BEff"];
+            double Hours = userData.operatingHours[0];
+            double infiltration = userData.infiltration[0];
+            double Heatgain = userData.iHG[0];
+
             double[] heatingSetPoints = new double[] { 10, 20 };
             double[] coolingSetPoints = new double[] { 28, 24 };
             double equipOffsetFraction = 0.1;
 
 
-
-            //BuildingConstructionData['uWall'];
             IDFFile.Building bui = new IDFFile.Building
             {
                 buildingConstruction = new IDFFile.BuildingConstruction(uWall[0], uGFloor[0], uRoof[0], uWindow[0], gWindow[0], 0.25, 0.25, 1050),
                 WWR = new IDFFile.WWR(WindowConstructData["wWR1"][0], WindowConstructData["wWR2"][0], WindowConstructData["wWR3"][0], WindowConstructData["wWR4"][0]),
 
                 chillerCOP = cCOP[0], boilerEfficiency = BEFF[0],
+                LightHeatGain = Heatgain / 2,
+                ElectricHeatGain = Heatgain / 2,
+                operatingHours = Hours,
+                infiltration = infiltration,
             };
             bui.CreateSchedules(heatingSetPoints, coolingSetPoints, equipOffsetFraction);
             bui.GenerateConstructionWithIComponentsU();
-            bui.GeneratePeopleLightingElectricEquipment();
-            bui.GenerateInfiltraitionAndVentillation();
-            //bui.GenerateHVAC(true, false, false);
 
-            for (int i=0; i <= userData.numFloors; i++)
+
+            for (int i=0; i <= userData.numFloors-1; i++)
             {
-                IDFFile.Zone zone = new IDFFile.Zone(bui, "Zone_numFloor_" + i, i);
+                IDFFile.Zone zone = new IDFFile.Zone(bui, "Zone_" + i, i);
+                zone.name = "Zone_" + i;
+                IDFFile.People newpeople = new IDFFile.People(10);
+                zone.people = newpeople;
                 ListOfZonesPerFloor.listZones.Add(zone);
 
             }
+            bui.AddZoneList(ListOfZonesPerFloor);
 
             return ListOfZonesPerFloor;
         }
@@ -355,10 +396,6 @@ namespace BIMToIDF
                     }
                 }
                 IDFFile.XYZList XYZCoordsOfFloorWallXYZList = new IDFFile.XYZList(AllPointsOfFloorPerFloor);
-                //IDFFile.Building NewBuilding = new IDFFile.Building();
-                //IDFFile.Zone NewZone = new IDFFile.Zone();
-                //IDFFile.SurfaceType CurrentSurfType = IDFFile.SurfaceType.Floor;
-                //IDFFile.BuildingSurface WallToAddPerFloor = new IDFFile.BuildingSurface(NewZone, XYZCoordsOfFloorWallXYZList, TotalArea, CurrentSurfType);
                 Tuple<double, IDFFile.XYZList> FloorToAdd = new Tuple<double, IDFFile.XYZList>(TotalArea, XYZCoordsOfFloorWallXYZList);
                 FloorFloors[i].Add(FloorToAdd);
 
@@ -399,12 +436,7 @@ namespace BIMToIDF
 
 
                 IDFFile.XYZList pointList1 = new IDFFile.XYZList(AllSingleWallPointList);
-            //IDFFile.Building NewBuilding = new IDFFile.Building();
-            //IDFFile.Zone NewZone = new IDFFile.Zone(NewBuilding, "FirstFloorWall", 1);
 
-            //IDFFile.BuildingSurface WallAddedToBuildingSurface = new IDFFile.BuildingSurface(NewZone, pointList1, Arean, CurrentSurfaceType);
-
-            //return (WallAddedToBuildingSurface, MaximalHeight,MinimalHeight);
 
             return (pointList1, MaximalHeight, MinimalHeight);
         }
@@ -412,7 +444,6 @@ namespace BIMToIDF
         {
             List<List<Tuple<double, IDFFile.XYZList>>> AllRoofs = new List<List<Tuple<double, IDFFile.XYZList>>>();
             List<Tuple<double, IDFFile.XYZList>> AllRoofsPossible = new List<Tuple<double, IDFFile.XYZList>>();
-            //IDFFile.SurfaceType CurrentSurfaceType = IDFFile.SurfaceType.Roof;
             foreach (Tuple<double, IDFFile.XYZList> roofP in PossibleRoof)
             {
                 IDFFile.XYZList RoofCoordinates = roofP.Item2;
@@ -420,7 +451,6 @@ namespace BIMToIDF
                 if (GetHeight == MaxH)
                 {   
                     AllRoofsPossible.Add(roofP);
-                    //roofP.surfaceType = CurrentSurfaceType;
                     AllRoofs.Add(AllRoofsPossible);
                 }
 
@@ -449,6 +479,17 @@ namespace BIMToIDF
             public List<IDFFile.BuildingSurface> FloorFloors;
             public List<IDFFile.BuildingSurface> GlobalRoof;
         }
+        public static IDFFile.IDFFile AssignIDFFileParameters(IDFFile.IDFFile IDFFileToReadAndWrite, List<Utility.StructureFloor> ExportedStructure )
+        {
+
+
+
+            IDFFileToReadAndWrite.building = ExportedStructure[0].FloorWalls[0].zone.building;
+
+
+            return IDFFileToReadAndWrite;
+        }
+
     }
-    
+
 }
