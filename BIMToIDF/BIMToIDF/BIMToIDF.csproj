@@ -40,6 +40,9 @@
     <StartProgram>$(ProgramW6432)\Autodesk\Revit 2019\Revit.exe</StartProgram>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="EnergyObjects">
+      <HintPath>..\..\EnergyObjects-master\obj\Debug\EnergyObjects.dll</HintPath>
+    </Reference>
     <Reference Include="IDFObjects">
       <HintPath>..\..\IDFObjects\bin\Debug\IDFObjects.dll</HintPath>
       <Private>True</Private>
