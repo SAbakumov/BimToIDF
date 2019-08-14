@@ -43,9 +43,10 @@
     <Reference Include="EnergyObjects">
       <HintPath>..\..\EnergyObjects-master\obj\Debug\EnergyObjects.dll</HintPath>
     </Reference>
-    <Reference Include="IDFObjects">
-      <HintPath>..\..\IDFObjects\bin\Debug\IDFObjects.dll</HintPath>
-      <Private>True</Private>
+    <Reference Include="IDFObjects, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\..\IDFObjects\bin\Debug\IDFObjects.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="RevitAPI">
       <HintPath>$(ProgramW6432)\Autodesk\Revit 2019\RevitAPI.dll</HintPath>
@@ -71,6 +72,11 @@
   </ItemGroup>
   <ItemGroup>
     <Content Include="BIMToIDF.addin" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="InputData.resx">
+      <DependentUpon>InputData.cs</DependentUpon>
+    </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
