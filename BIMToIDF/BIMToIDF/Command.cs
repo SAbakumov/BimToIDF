@@ -36,37 +36,34 @@ namespace BIMToIDF
             string folderPath = fullPath.Remove(fullPath.IndexOf('.'));
 
             try { Directory.CreateDirectory(folderPath); } catch { }
+            Random r = new Random();
 
             InputData userData = new InputData();
             userData.ShowDialog();
-            Dictionary<string, IDFFile.Building> sampledData = Utility.GetAverageBuildingFromMasses(doc,userData);
-            foreach (KeyValuePair<string, IDFFile.Building> sample in sampledData)
+            if (userData.cancel) { return Result.Failed; }
+
+            List<IDFFile.BuildingConstruction> constructions = Utility.GenerateRandomConstruction(userData.pBuildingConstruction, userData.numSamples, r);
+            List<IDFFile.WWR> WWRs = Utility.GenerateRandomWWR(userData.pWindowConstruction, userData.numSamples, r);
+            List<IDFFile.BuildingOperation> buildingOperations = Utility.GenerateRandomBuildingParameters(userData.pBuildingOperation, userData.numSamples, r);
+
+            File.WriteAllLines(string.Format("{0}/{1}.csv", folderPath, "Avg"), userData.pBuildingConstruction.ToCSVString());
+            File.WriteAllLines(string.Format("{0}/{1}.csv", folderPath, "All"), constructions.Select(c=>c.ToCSVString()));
+
+            Dictionary<string, IDFFile.Building> modelBuildings = Utility.GetAverageBuildingFromMasses(doc, userData.numFloors, userData.pBuildingConstruction.GetAverage(),
+               userData.pWindowConstruction.GetAverage(), userData.pBuildingOperation.GetAverage() );
+
+            foreach (KeyValuePair<string, IDFFile.Building> modelBuilding in modelBuildings)
             {
-                IDFFile.IDFFile file = new IDFFile.IDFFile() { name = sample.Key, building = sample.Value };
-                string fullFileName = string.Format("{0}/{1}.idf", folderPath, sample.Key);
+                IDFFile.IDFFile file = new IDFFile.IDFFile() { name = modelBuilding.Key, building = modelBuilding.Value };
+                string fullFileName = string.Format("{0}/{1}.idf", folderPath, modelBuilding.Key);
                 file.GenerateOutput(true, "Annual");
                 File.WriteAllLines(fullFileName, file.WriteFile());
-            }
 
-            foreach (KeyValuePair<string, IDFFile.Building> sample in sampledData)
-            {
-                IDFFile.IDFFile file = new IDFFile.IDFFile() { name = sample.Key, building = sample.Value };
-                IDFFile.Building Bui = sample.Value;
-
-                Tuple<List<Dictionary<string, double>>, List<Dictionary<string, double>>> RandomAttributes = Utility.GenerateProbabilisticRandomValueLists(Bui, userData.numSamples);
-                List<IDFFile.Building> AllRandomBuildings = new List<IDFFile.Building>();
-                for (int i=0;i<userData.numSamples; i++)
+                for (int i=0; i<userData.numSamples; i++)
                 {
-                    IDFFile.Building RandBuild = Utility.GetRandomCopyOfModelBuilding(Utility.DeepClone(Bui), RandomAttributes.Item1[i], RandomAttributes.Item2[i]);
-                    AllRandomBuildings.Add(Utility.DeepClone(RandBuild));
-                }
-                for (int i = 0; i < userData.numSamples; i++)
-                {
-                    IDFFile.IDFFile IDFFileSample= new IDFFile.IDFFile();
-                    IDFFileSample.building = AllRandomBuildings[i];
-                    string fullFileName = string.Format("{0}/{1}_{2}.idf", folderPath, sample.Key, i.ToString());
-                    IDFFileSample.GenerateOutput(false, "Annual");
-                    File.WriteAllLines(fullFileName, IDFFileSample.WriteFile());
+                    file.building.UpdateBuildingConstructionWWROperations(constructions[i], WWRs[i], buildingOperations[i]);
+                    fullFileName = string.Format("{0}/{1}_{2}.idf", folderPath, modelBuilding.Key, i.ToString());
+                    File.WriteAllLines(fullFileName, file.WriteFile());
                 }
             }
             return Result.Succeeded;
@@ -82,16 +79,15 @@ namespace BIMToIDF
         public static double SqFtToSqM(double value)
         {
             return (Math.Round(value * 0.092903, 5));
-        }
-        
+        }      
         public static XYZ ftToM(this XYZ point)
         {
             return new XYZ(FtToM(point.X), FtToM(point.Y), FtToM(point.Z));
         }
-        public static Dictionary<string, IDFFile.Building> GetAverageBuildingFromMasses(Document doc, InputData userData)
+        public static Dictionary<string, IDFFile.Building> GetAverageBuildingFromMasses(Document doc, int nFloors, IDFFile.BuildingConstruction constructions,
+        IDFFile.WWR WWR, IDFFile.BuildingOperation buildingOperations )
         {
-            int numberofFloors = userData.numFloors;
-            Dictionary<string, IDFFile.Building> structures = new Dictionary<string, IDFFile.Building>();
+            Dictionary<string, IDFFile.Building> buildings = new Dictionary<string, IDFFile.Building>();
 
             List<View3D> views = (new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()).Where(v => v.Name.Contains("Op - ")).ToList();
             foreach (View3D v1 in views)
@@ -101,12 +97,10 @@ namespace BIMToIDF
                 List<IDFFile.XYZ> groundPoints = new List<IDFFile.XYZ>();
                 List<IDFFile.XYZ> roofPoints = new List<IDFFile.XYZ>();
                 double floorArea = 0;
-
                 foreach (Element mass in masses)
                 {
                     Options op = new Options() { ComputeReferences = true };
                     GeometryElement gElement = mass.get_Geometry(op);
-
                     foreach (GeometryObject SolidStructure in gElement)
                     {
                         Solid GeoObject = SolidStructure as Solid;
@@ -114,9 +108,7 @@ namespace BIMToIDF
                         {
                             FaceArray AllFacesFromModel = GeoObject.Faces;
                             if (AllFacesFromModel.Size != 0)
-                            {
-                                
-
+                            {                              
                                 foreach (Face face1 in AllFacesFromModel)
                                 {
                                     XYZ fNormal = (face1 as PlanarFace).FaceNormal;
@@ -131,19 +123,16 @@ namespace BIMToIDF
                                     {
                                         roofPoints.AddRange(GetPoints(face1));
                                     }
-                                }
-                             
-                                               
+                                }                                                            
                             }
                         }
                     }
-
                 }
-                IDFFile.Building building = InitialiseAverageBuilding(userData, groundPoints, roofPoints, floorArea);
+                IDFFile.Building building = InitialiseModelBuilding(groundPoints, roofPoints, floorArea, nFloors, constructions, WWR, buildingOperations );
 
-                structures.Add(v1.Name.Remove(0, 4), building);
+                buildings.Add(v1.Name.Remove(0, 4), building);
             }
-            return structures;
+            return buildings;
         }
         public static List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> GetAllWallEdges(List<IDFFile.XYZ> groundPoints)
         {
@@ -160,120 +149,109 @@ namespace BIMToIDF
                 }
             }
             return wallEdges;
-        }
-        
-        public static Tuple<List<Dictionary<string, double>>, List<Dictionary<string,double>>> GenerateProbabilisticRandomValueLists(IDFFile.Building ModelBuilding,int numsamples)
-
+        }     
+        public static List<IDFFile.BuildingConstruction> GenerateRandomConstruction(IDFFile.ProbabilisticBuildingConstruction pConstruction, int numsamples, Random r)
         {
-            List<Dictionary<string, double>> AllWWRvals = new List<Dictionary<string, double>>();
-            List<Dictionary<string, double>> AllRandValuesList = new List<Dictionary<string, double>>();
-
-            IDFFile.ProbabilisticBuildingConstruction ProbValBuild = ModelBuilding.pBuildingConstruction;
-            IDFFile.ProbabilisticWWR ProbValWWR = ModelBuilding.pWWR;
-
-            for (int i = 0; i< numsamples; i++)
+            List<IDFFile.BuildingConstruction> constructions = new List<IDFFile.BuildingConstruction>();
+            for (int i = 0; i < numsamples; i++)
             {
-                Random r = new Random();
-
-                Dictionary<string, double> WWRvals = new Dictionary<string, double>();
-                Dictionary<string, double> AllRandValues = new Dictionary<string, double>();
-
-                AllRandValues["uWall"]=GetRandom(ProbValBuild.uWall ,r);
-                AllRandValues["GFloor"] = GetRandom(ProbValBuild.uGFloor, r);
-                AllRandValues["uRoof"] = GetRandom(ProbValBuild.uRoof, r);
-                AllRandValues["uWindow"] = GetRandom(ProbValBuild.uWindow, r);
-                AllRandValues["gWindow"] = GetRandom(ProbValBuild.gWindow, r);
-                AllRandValues["uIWall"] = GetRandom(ProbValBuild.uIWall, r);
-                AllRandValues["uIFloor"] = GetRandom(ProbValBuild.uIFloor, r);
-                AllRandValues["HCFloor"] = GetRandom(ProbValBuild.HCFloor, r);
-
-                WWRvals["East"] = GetRandom(ProbValWWR.east, r);
-                WWRvals["South"] = GetRandom(ProbValWWR.south, r);
-                WWRvals["North"] = GetRandom(ProbValWWR.north, r);
-                WWRvals["West"] = GetRandom(ProbValWWR.west, r);
-
-                AllWWRvals.Add(Utility.DeepClone(WWRvals));
-                AllRandValuesList.Add(Utility.DeepClone(AllRandValues));
+                constructions.Add(new IDFFile.BuildingConstruction()
+                {
+                    uWall = GetRandom(pConstruction.uWall, r),
+                    uGFloor = GetRandom(pConstruction.uGFloor, r),
+                    uRoof = GetRandom(pConstruction.uRoof, r),
+                    uWindow = GetRandom(pConstruction.uWindow, r),
+                    gWindow = GetRandom(pConstruction.gWindow, r),
+                    uIWall = GetRandom(pConstruction.uIWall, r),
+                    uIFloor = GetRandom(pConstruction.uIFloor, r),
+                    hcSlab = GetRandom(pConstruction.hcSlab, r),
+                    infiltration = GetRandom(pConstruction.infiltration, r),
+                });              
+            }            
+            return constructions;
+        }
+        public static List<IDFFile.WWR> GenerateRandomWWR(IDFFile.ProbabilisticWWR pWWR, int numsamples, Random r)
+        {
+            List<IDFFile.WWR> WWRs = new List<IDFFile.WWR>();
+            for (int i = 0; i < numsamples; i++)
+            {
+                WWRs.Add(new IDFFile.WWR()
+                {
+                    east = GetRandom(pWWR.east, r),
+                    south = GetRandom(pWWR.south, r),
+                    north = GetRandom(pWWR.north, r),
+                    west = GetRandom(pWWR.west, r)                
+                });
+                
+            }
+            return WWRs;
+        }
+        public static List<IDFFile.BuildingOperation> GenerateRandomBuildingParameters(IDFFile.ProbabilisticBuildingOperation pOP, int numsamples, Random r)
+        {
+            List<IDFFile.BuildingOperation> bParameters = new List<IDFFile.BuildingOperation>();
+            for (int i = 0; i < numsamples; i++)
+            {
+                bParameters.Add(new IDFFile.BuildingOperation()
+                {
+                    internalHeatGain = GetRandom(pOP.internalHeatGain, r),
+                    operatingHours = GetRandom(pOP.operatingHours, r),
+                    boilerEfficiency = GetRandom(pOP.boilerEfficiency, r),
+                    chillerCOP = GetRandom(pOP.chillerCOP, r)
+                });
 
             }
-            Tuple<List<Dictionary<string, double>>, List<Dictionary<string, double>>> RandVals = Tuple.Create(AllRandValuesList,AllWWRvals);
-
-            return RandVals;
+            return bParameters;
         }
-        public static IDFFile.Building InitialiseAverageBuilding(InputData userData, List<IDFFile.XYZ> groundPoints, List<IDFFile.XYZ> roofPoints, double area)
+        public static IDFFile.Building InitialiseModelBuilding(List<IDFFile.XYZ> groundPoints, List<IDFFile.XYZ> roofPoints, double area, int nFloors,
+            IDFFile.BuildingConstruction constuction, IDFFile.WWR wwr, IDFFile.BuildingOperation operation)
         {
             IDFFile.ZoneList zoneList = new IDFFile.ZoneList("Office");
-
-            Dictionary<string, double[]> WindowConstructData = userData.windowConstruction;
-            Dictionary<string, double[]> BuildingConstructionData = userData.buildingConstruction;
-            double[] uWall = BuildingConstructionData["uWall"];
-            double[] uGFloor = BuildingConstructionData["uGFloor"];
-            double[] uRoof = BuildingConstructionData["uRoof"];
-            double[] uWindow = BuildingConstructionData["uWindow"];
-            double[] gWindow = BuildingConstructionData["gWindow"];
-            double[] cCOP = BuildingConstructionData["CCOP"];
-            double[] BEFF = BuildingConstructionData["BEff"];
-            double[] uIFloor = BuildingConstructionData["uIFloor"];
-            double[] HCFloor = BuildingConstructionData["HCFloor"];
-            double Hours = userData.operatingHours[0];
-            double infiltration = userData.infiltration[0];
-            double Heatgain = userData.iHG[0];
 
             double[] heatingSetPoints = new double[] { 10, 20 };
             double[] coolingSetPoints = new double[] { 28, 24 };
             double equipOffsetFraction = 0.1;
-            //THIS NEEDS TO BE CHECKED - INSTEAD OF SECOND uWall there should be uIWall
-            IDFFile.ProbabilisticWWR ProbabilisticWindowConstruction = new IDFFile.ProbabilisticWWR(WindowConstructData["wWR1"], WindowConstructData["wWR2"], WindowConstructData["wWR3"], WindowConstructData["wWR4"]);
-            IDFFile.ProbabilisticBuildingConstruction ProbabilisticAttributes = new IDFFile.ProbabilisticBuildingConstruction(uWall, uGFloor, uRoof, uIFloor, uWall, uWindow, gWindow, HCFloor);
             IDFFile.Building bui = new IDFFile.Building
             {
-                buildingConstruction = new IDFFile.BuildingConstruction(uWall[0], uGFloor[0], uRoof[0], uWindow[0], gWindow[0], 0.25, 0.25, 1050),
-                WWR = new IDFFile.WWR(WindowConstructData["wWR1"][0], WindowConstructData["wWR2"][0], WindowConstructData["wWR3"][0], WindowConstructData["wWR4"][0]),
-
-                chillerCOP = cCOP[0], boilerEfficiency = BEFF[0],
-                LightHeatGain = Heatgain / 2,
-                ElectricHeatGain = Heatgain / 2,
-                operatingHours = Hours,
-                infiltration = infiltration,
+                buildingConstruction = constuction,
+                WWR = wwr,
+                buildingOperation = operation
             };
-            bui.pWWR = ProbabilisticWindowConstruction;
-            bui.pBuildingConstruction = ProbabilisticAttributes;
+            bui.UpdataBuildingOperations();
             bui.CreateSchedules(heatingSetPoints, coolingSetPoints, equipOffsetFraction);
             bui.GenerateConstructionWithIComponentsU();
             IDFFile.ScheduleCompact Schedule = bui.schedulescomp.First(s=>s.name.Contains("Occupancy"));
 
             double baseZ = groundPoints.First().Z;
             double roofZ = roofPoints.First().Z;
-
-            double heightFl = (roofZ - baseZ) / userData.numFloors;
+            double heightFl = (roofZ - baseZ) / nFloors;
 
             IDFFile.XYZList dlPoints = GetDayLightPointsXYZList(groundPoints, GetAllWallEdges(groundPoints));
-
-            for (int i = 0; i < userData.numFloors; i++)
+            for (int i = 0; i < nFloors; i++)
             {
                 double floorZ = baseZ + i * heightFl;
                 IDFFile.XYZList floorPoints = new IDFFile.XYZList(groundPoints).ChangeZValue(floorZ);
-
                 IDFFile.Zone zone = new IDFFile.Zone(bui, "Zone_" + i, i);
                 zone.name = "Zone_" + i;
                 IDFFile.People newpeople = new IDFFile.People(10);
                 zone.people = newpeople;
-
                 if (i == 0)
                 {
                     IDFFile.BuildingSurface floor = new IDFFile.BuildingSurface(zone, floorPoints, area, IDFFile.SurfaceType.Floor);
                 }
                 else
                 {
-                    IDFFile.BuildingSurface floor = new IDFFile.BuildingSurface(zone, floorPoints, area, IDFFile.SurfaceType.InternalFloor) { OutsideObject = "Zone_" + (i-1).ToString()};
+                    IDFFile.BuildingSurface floor = new IDFFile.BuildingSurface(zone, floorPoints, area, IDFFile.SurfaceType.Floor)
+                    {
+                        ConstructionName = "General_Floor_Ceiling",
+                        OutsideCondition = "Zone", OutsideObject = "Zone_" + (i-1).ToString()
+                    };
                 }
-
-                if (i == userData.numFloors - 1)
-                {
-                    IDFFile.BuildingSurface roof = new IDFFile.BuildingSurface(zone, new IDFFile.XYZList(roofPoints), area, IDFFile.SurfaceType.Floor) { OutsideObject = "Zone_" + (i - 1).ToString() };
-                }
-
                 floorPoints.createWalls(zone, heightFl);
+                if (i == nFloors - 1)
+                {
+                    roofPoints.Reverse();
+                    IDFFile.BuildingSurface roof = new IDFFile.BuildingSurface(zone, new IDFFile.XYZList(roofPoints), area, IDFFile.SurfaceType.Roof);
+                }     
 
                 IDFFile.DayLighting DayPoints = new IDFFile.DayLighting(zone, Schedule, dlPoints.ChangeZValue(floorZ+0.9).xyzs, 500);
 
@@ -299,37 +277,10 @@ namespace BIMToIDF
         }
         public static IDFFile.XYZList GetDayLightPointsXYZList(List<IDFFile.XYZ> FloorFacePoints, List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> WallEdges)
         {
-
-            List<IDFFile.XYZ> DayLightPoints = new List<IDFFile.XYZ>();
-            List<IDFFile.XYZ> VectorList = new List<IDFFile.XYZ>();
-            foreach (IDFFile.XYZ Point in FloorFacePoints)
-            {
-                double xcoord = Math.Round(Point.X, 4);
-                double ycoord = Math.Round(Point.Y, 4);
-                double zcoord = Math.Round(Point.Z, 4);
-                IDFFile.XYZ NewVector = new IDFFile.XYZ (xcoord, ycoord, zcoord);
-                VectorList.Add(NewVector);
-            }
-            IDFFile.XYZ[] AllPoints = new IDFFile.XYZ[VectorList.Count];
-            for (int i = 0; i < VectorList.Count; i++)
-            {
-                AllPoints[i] = VectorList[i];
-
-            }
-            IDFFile.XYZ[] CentersOfMass = TriangulateAndGetCenterOfMass(AllPoints);
-            
-            foreach (IDFFile.XYZ CM in CentersOfMass)
-            {
-                if (RayCastToCheckIfIsInside(WallEdges, CM))
-                {
-                    DayLightPoints.Add(DeepClone(CM));
-                }
-            }
-
-            //IDFFile.XYZList AllDayLightPoints = new IDFFile.XYZList(DayLightPoints);
-            return new IDFFile.XYZList(DayLightPoints);
+            List<IDFFile.XYZ> CentersOfMass = TriangulateAndGetCenterOfMass(FloorFacePoints);
+            return new IDFFile.XYZList(CentersOfMass.Where(p => RayCastToCheckIfIsInside(WallEdges, p)).ToList());
         }
-        public static IDFFile.XYZ CenterOfMass(IDFFile.XYZ[] points)
+        public static IDFFile.XYZ CenterOfMass(List<IDFFile.XYZ> points)
         {
             return new IDFFile.XYZ()
             {
@@ -338,25 +289,35 @@ namespace BIMToIDF
                 Z = points.Select(p => p.Z).Average(),
             };
         }
-        public static IDFFile.XYZ[] TriangulateAndGetCenterOfMass(IDFFile.XYZ[] AllPoints)
+        public static List<IDFFile.XYZ> TriangulateAndGetCenterOfMass(List<IDFFile.XYZ> AllPoints)
         {
-            int[] PointNumbers = Enumerable.Range(-1, AllPoints.Length + 2).ToArray();
+            int[] PointNumbers = Enumerable.Range(-1, AllPoints.Count() + 2).ToArray();
 
-            PointNumbers[0] = AllPoints.Length - 1;
+            PointNumbers[0] = AllPoints.Count() - 1;
             PointNumbers[PointNumbers.Length - 1] = 0;
-            IDFFile.XYZ[] CentersOfMass = new IDFFile.XYZ[AllPoints.Length];
+            List<IDFFile.XYZ> CentersOfMass = new List<IDFFile.XYZ>();
 
-            for (int i = 1; i < PointNumbers.Length - 1; i++)
+            for (int i= 0; i<AllPoints.Count(); i++)
             {
-                IDFFile.XYZ[] Triangle = new IDFFile.XYZ[3];
-                Triangle[0] = AllPoints[PointNumbers[i - 1]];
-                Triangle[1] = AllPoints[PointNumbers[i]];
-                Triangle[2] = AllPoints[PointNumbers[i + 1]];
-
-                IDFFile.XYZ cM = CenterOfMass(Triangle);
-                CentersOfMass[i - 1] = cM;
+                IDFFile.XYZ pointCM = new IDFFile.XYZ();
+                try
+                {
+                    pointCM = CenterOfMass(new List<IDFFile.XYZ>() { AllPoints[i - 1], AllPoints[i], AllPoints[i + 1] });
+                }
+                catch
+                {
+                    try
+                    {
+                        pointCM = CenterOfMass(new List<IDFFile.XYZ>() { AllPoints.Last(), AllPoints[i], AllPoints[i + 1] });
+                    }
+                    catch
+                    {
+                        pointCM = CenterOfMass(new List<IDFFile.XYZ>() { AllPoints[i - 1], AllPoints[i], AllPoints.First() });
+                    }
+                }
+                CentersOfMass.Add(pointCM);
             }
-            CentersOfMass.Append(CenterOfMass(AllPoints));
+            CentersOfMass.Add(CenterOfMass(AllPoints));
             return CentersOfMass;
         }
         public static bool RayCastToCheckIfIsInside(List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> EdgeArrayForPossibleWall, IDFFile.XYZ CM)
@@ -388,28 +349,6 @@ namespace BIMToIDF
         {
             return new IDFFile.XYZ(point.X, point.Y, point.Z);
         }
-        public static List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> GetEdgesOfPolygon(PlanarFace PossibleWall)
-        {
-
-            List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> EdgeLoop = new List<Tuple<IDFFile.XYZ, IDFFile.XYZ>>();
-
-            EdgeArrayArray edgeArrays = PossibleWall.EdgeLoops;
-            foreach (EdgeArray edges in edgeArrays)
-            {
-                foreach (Edge edge in edges)
-                {
-                    // Get one test point
-                    XYZ Point1 = edge.Evaluate(1).ftToM();
-                    XYZ Point2 = edge.Evaluate(0).ftToM();
-                    IDFFile.XYZ Vertex1 = Point1.ConvertToIDF();
-                    IDFFile.XYZ Vertex2 = Point2.ConvertToIDF();
-
-                    Tuple<IDFFile.XYZ, IDFFile.XYZ> EdgeToAdd = new Tuple<IDFFile.XYZ, IDFFile.XYZ>(Vertex1, Vertex2);
-                    EdgeLoop.Add(EdgeToAdd);
-                }
-            }
-            return EdgeLoop;
-        }
         public class BuildingDesignParameters
         {
             public double Length, Width, Height, rLenA, rWidA, BasementDepth, Orientation,
@@ -431,45 +370,7 @@ namespace BIMToIDF
         }
         public static double GetRandom(double[] range, Random r)
         {
-            return (range[0] * (1 + range[1] * (2 * r.NextDouble() - 1)));
+            return range[0] + ((range[1] - range[0]) * r.NextDouble());
         }
-        public static IDFFile.Building GetRandomCopyOfModelBuilding(IDFFile.Building ModelBuilding, Dictionary<string, double> AllRandValues, Dictionary<string, double> WWRPr)
-        {
-            ModelBuilding.buildingConstruction.uWall = AllRandValues["uWall"];
-            ModelBuilding.buildingConstruction.uGFloor = AllRandValues["GFloor"];
-            ModelBuilding.buildingConstruction.uRoof  =AllRandValues["uRoof"];
-            ModelBuilding.buildingConstruction.uWindow = AllRandValues["uWindow"];
-            ModelBuilding.buildingConstruction.gWindow = AllRandValues["gWindow"];
-            ModelBuilding.buildingConstruction.uIWall = AllRandValues["uIWall"];
-            ModelBuilding.buildingConstruction.uIFloor = AllRandValues["uIFloor"];
-            ModelBuilding.buildingConstruction.hcIFloor = AllRandValues["HCFloor"];
-            IDFFile.WWR WWR = new IDFFile.WWR(WWRPr["North"], WWRPr["East"], WWRPr["South"], WWRPr["West"]);
-
-            ModelBuilding.WWR = WWR;
-            ModelBuilding = UpdateFenestrations(ModelBuilding);
-            ModelBuilding.GeneratePeopleLightingElectricEquipment();
-            ModelBuilding.GenerateInfiltraitionAndVentillation();
-            ModelBuilding.shadingControls = new List<IDFFile.ShadingControl>();
-            ModelBuilding.windowMaterialShades = new List<IDFFile.WindowMaterialShade>();
-
-            //ModelBuilding.CreateSchedules(heatingSetPoints, coolingSetPoints, equipOffsetFraction);
-            ModelBuilding.GenerateConstructionWithIComponentsU();
-            return ModelBuilding;
-
-        }
-        public static IDFFile.Building UpdateFenestrations(IDFFile.Building BuiRand)
-        {        
-            foreach (IDFFile.BuildingSurface toupdate in BuiRand.bSurfaces)
-            {
-                if (toupdate.surfaceType == IDFFile.SurfaceType.Wall)
-                {
-                    toupdate.AssociateWWRandShadingLength();
-                    toupdate.fenestrations = toupdate.CreateFenestration(1);
-                }
-            }
-            return BuiRand;
-        }
-
     }
-
 }

@@ -40,13 +40,8 @@
     <StartProgram>$(ProgramW6432)\Autodesk\Revit 2019\Revit.exe</StartProgram>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="EnergyObjects">
-      <HintPath>..\..\EnergyObjects-master\obj\Debug\EnergyObjects.dll</HintPath>
-    </Reference>
-    <Reference Include="IDFObjects, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
+    <Reference Include="IDFObjects">
       <HintPath>..\..\..\IDFObjects\bin\Debug\IDFObjects.dll</HintPath>
-      <Private>False</Private>
     </Reference>
     <Reference Include="RevitAPI">
       <HintPath>$(ProgramW6432)\Autodesk\Revit 2019\RevitAPI.dll</HintPath>
@@ -67,7 +62,9 @@
     <Compile Include="InputData.cs">
       <SubType>Form</SubType>
     </Compile>
-    <Compile Include="InputData.designer.cs" />
+    <Compile Include="InputData.designer.cs">
+      <DependentUpon>InputData.cs</DependentUpon>
+    </Compile>
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>

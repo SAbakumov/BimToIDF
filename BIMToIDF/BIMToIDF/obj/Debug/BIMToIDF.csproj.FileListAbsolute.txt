@@ -19,3 +19,14 @@ C:\Users\abaku\Documents\GitHub\BIMToIDF\BIMToIDF\bin\Debug\EnergyObjects.pdb
 \\Mac\Home\Documents\GitHub\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.pdb
 \\Mac\Home\Documents\GitHub\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.InputData.resources
 \\Mac\Home\Documents\GitHub\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.GenerateResource.cache
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\bin\Debug\BIMToIDF.dll
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\bin\Debug\BIMToIDF.pdb
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csprojAssemblyReference.cache
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.InputData.resources
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.GenerateResource.cache
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.CoreCompileInputs.cache
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.dll
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.pdb
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\bin\Debug\IDFObjects.dll
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\bin\Debug\IDFObjects.pdb
+C:\Users\manav\source\repos\BimToIDF\BIMToIDF\BIMToIDF\obj\Debug\BIMToIDF.csproj.CopyComplete

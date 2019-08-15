@@ -11,11 +11,13 @@ namespace BIMToIDF
 {
     public partial class InputData : Form
     {
-        public bool differentFloors;
+        public bool cancel = false;
+
         public int numFloors;
         public int numSamples = 1000;
-        public Dictionary<string, double[]> buildingConstruction = new Dictionary<string, double[]>();
-        public Dictionary<String, double[]> windowConstruction = new Dictionary<string, double[]>();
+        public IDFFile.ProbabilisticBuildingConstruction pBuildingConstruction;
+        public IDFFile.ProbabilisticWWR pWindowConstruction;
+        public IDFFile.ProbabilisticBuildingOperation pBuildingOperation;
 
         //oPH, iHG, venti
         public double[] operatingHours;
@@ -30,45 +32,43 @@ namespace BIMToIDF
         private void button1_Click(object sender, EventArgs e)
         {
             numFloors = (int)number.Value;
-            differentFloors = diffNFloors.Checked;
             numSamples = (int)sampleCount.Value;
-            windowConstruction.Add("wWR1", new double[] { (double)wWR1_mean.Value, .01 * (double)wWR1_var.Value });
-            windowConstruction.Add("wWR2", new double[] { (double)wWR1_mean.Value, .01 * (double)wWR1_var.Value });
-            windowConstruction.Add("wWR3", new double[] { (double)wWR1_mean.Value, .01 * (double)wWR1_var.Value });
-            windowConstruction.Add("wWR4", new double[] { (double)wWR1_mean.Value, .01 * (double)wWR1_var.Value });
+            pWindowConstruction = new IDFFile.ProbabilisticWWR()
+            {
+                north = GetMinMax(wWR1_mean, wWR1_var),
+                east = GetMinMax(wWR2_mean, wWR2_var),
+                south = GetMinMax(wWR3_mean, wWR3_var),
+                west = GetMinMax(wWR4_mean, wWR4_var)
+            };
 
-            buildingConstruction.Add("uWall", new double[] { (double) uWall_mean.Value, .01 * (double) uWall_var.Value });
-            buildingConstruction.Add("uGFloor", new double[] { (double)uGFloor_mean.Value, .01 * (double)uGFloor_var.Value });
-            buildingConstruction.Add("uRoof", new double[] { (double)uRoof_mean.Value, .01 * (double)uRoof_var.Value });
-            buildingConstruction.Add("uIFloor", new double[] { (double)uIFloor_Mean.Value, .01 * (double)uIFloor_var.Value });
-            buildingConstruction.Add("uWindow", new double[] { (double)uWindow_mean.Value, .01 * (double)uWindow_var.Value });
-            buildingConstruction.Add("gWindow", new double[] { (double)gWindow_mean.Value, .01 * (double)gWindow_var.Value });
-            buildingConstruction.Add("HCFloor", new double[] { (double)HCFloor_mean.Value, .01 * (double)HCFloor_var.Value });
+            pBuildingConstruction = new IDFFile.ProbabilisticBuildingConstruction
+            {
+                uWall = GetMinMax(uWall_mean, uWall_var),
+                uGFloor = GetMinMax(uGFloor_mean,  uGFloor_var),
+                uRoof = GetMinMax(uRoof_mean,  uRoof_var),
+                uIFloor = GetMinMax(uIFloor_Mean,  uIFloor_var),
+                uIWall = GetMinMax(uWall_mean, uWall_var),
+                uWindow = GetMinMax(uWindow_mean,  uWindow_var),
+                gWindow = GetMinMax(gWindow_mean,  gWindow_var),
+                hcSlab = GetMinMax(HCFloor_mean,  HCFloor_var),
+                infiltration = GetMinMax(vent_mean,  vent_var)
+            };
 
-            buildingConstruction.Add("BEff", new double[] { (double)bEffMean.Value, .01 * (double)bEffVar.Value });
-            buildingConstruction.Add("CCOP", new double[] { (double)CCOPMean.Value, .01 * (double)CCOPVar.Value });
+            pBuildingOperation = new IDFFile.ProbabilisticBuildingOperation()
+            {
+                boilerEfficiency = GetMinMax(bEffMean,  bEffVar),
+                chillerCOP = GetMinMax(CCOPMean,  CCOPVar),
 
-            operatingHours = new double[] { (double)oPH_mean.Value, .01 * (double) oPH_var.Value };
-            iHG = new double[] { (double)iHG_mean.Value, .01 * (double)iHG_var.Value };
-            infiltration = new double[] { (double)vent_mean.Value , .01 * (double)vent_var.Value };
-
+                operatingHours = GetMinMax(oPH_mean,  oPH_var),
+                internalHeatGain = GetMinMax(iHG_mean,  iHG_var)
+            };
             this.Close();
         }
 
-        private void diffNFloors_CheckedChanged(object sender, EventArgs e)
+        private double[] GetMinMax(NumericUpDown mean, NumericUpDown var)
         {
-            if (diffNFloors.Checked)
-            {
-                this.label18.Enabled = false;
-                this.number.Enabled = false;
-            }
-            else
-            {
-                this.label18.Enabled = true;
-                this.number.Enabled = true;
-            }
+            return new double[] { (double)mean.Value * (1 - .01 * (double)var.Value), (double)mean.Value * (1+ .01 * (double)var.Value) };
         }
-
         private void label19_Click(object sender, EventArgs e)
         {
 
@@ -87,6 +87,17 @@ namespace BIMToIDF
         private void SampleCount_ValueChanged(object sender, EventArgs e)
         {
 
+        }
+
+        private void InputData_Load(object sender, EventArgs e)
+        {
+
+        }
+
+        private void Button2_Click(object sender, EventArgs e)
+        {
+            cancel = true;
+            this.Close();
         }
     }
 }
