@@ -13,6 +13,7 @@ namespace BIMToIDF
     {
         public bool cancel = false;
 
+        public string epLoc, weatherLoc;
         public int numFloors;
         public int numSamples = 1000;
         public IDFFile.ProbabilisticBuildingConstruction pBuildingConstruction;
@@ -23,14 +24,19 @@ namespace BIMToIDF
         public double[] operatingHours;
         public double[] iHG;
         public double[] infiltration;
+        public string simulationType;
 
-        public InputData()
+        public InputData(string docLocation)
         {
             InitializeComponent();
+            weLoc.Text = docLocation + "/Munich.epw";
         }
 
         private void button1_Click(object sender, EventArgs e)
         {
+            epLoc = EPLoc.Text;
+            weatherLoc = weLoc.Text;
+
             numFloors = (int)number.Value;
             numSamples = (int)sampleCount.Value;
             pWindowConstruction = new IDFFile.ProbabilisticWWR()
@@ -98,6 +104,46 @@ namespace BIMToIDF
         {
             cancel = true;
             this.Close();
+        }
+
+        private void Label17_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void Label22_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void OpenFileDialog1_FileOk(object sender, CancelEventArgs e)
+        {
+
+        }
+
+        private void Button4_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog o1 = new OpenFileDialog();
+            DialogResult result = o1.ShowDialog();
+            if (result == DialogResult.OK)
+            {
+                weLoc.Text = o1.FileName;
+            }
+        }
+
+        private void ComboBox1_SelectedIndexChanged(object sender, EventArgs e)
+        {
+            simulationType = comboBox1.SelectedItem.ToString();          
+        }
+
+        private void Browse_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog o1 = new OpenFileDialog();
+            DialogResult result = o1.ShowDialog();
+            if (result == DialogResult.OK)
+            {
+                EPLoc.Text = o1.FileName;
+            }
         }
     }
 }

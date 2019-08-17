@@ -12,6 +12,7 @@ using System.Linq;
 using System.Windows.Forms;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.IO;
+using System.Threading.Tasks;
 //using IDFFile;
 #endregion
 
@@ -32,62 +33,99 @@ namespace BIMToIDF
             Autodesk.Revit.ApplicationServices.Application app = uiapp.Application;
             Document doc = uidoc.Document;
 
-            string fullPath = doc.PathName;
-            string folderPath = fullPath.Remove(fullPath.IndexOf('.'));
+            string docPath = doc.PathName;
+            string folderPath = docPath.Remove(docPath.IndexOf('.'));
 
             try { Directory.CreateDirectory(folderPath); } catch { }
             Random r = new Random();
 
-            InputData userData = new InputData();
+            InputData userData = new InputData(new FileInfo(doc.PathName).DirectoryName);
             userData.ShowDialog();
             if (userData.cancel) { return Result.Failed; }
 
-            List<IDFFile.BuildingConstruction> constructions = Utility.GenerateRandomConstruction(userData.pBuildingConstruction, userData.numSamples, r);
-            List<IDFFile.WWR> WWRs = Utility.GenerateRandomWWR(userData.pWindowConstruction, userData.numSamples, r);
-            List<IDFFile.BuildingOperation> buildingOperations = Utility.GenerateRandomBuildingParameters(userData.pBuildingOperation, userData.numSamples, r);
+            switch (userData.simulationType)
+            {
+                case "Simplified EnergyPlus Simulation":
+                    new SimplifiedEP(doc, userData, r).RunAnalysis();
+                break;
+            }
+           
+            return Result.Succeeded;
+        }
+    }
 
-            File.WriteAllLines(string.Format("{0}/{1}.csv", folderPath, "Avg"), userData.pBuildingConstruction.ToCSVString());
-            File.WriteAllLines(string.Format("{0}/{1}.csv", folderPath, "All"), constructions.Select(c=>c.ToCSVString()));
+    public class SimplifiedEP
+    {
+        Document document;
+        InputData inputData;
+        Random random;
+        string docPath, folderPath;
+        Dictionary<string, IDFFile.Building> AvgBuildings;
+        public SimplifiedEP(Document document, InputData inputData, Random random)
+        {
+            this.document = document; this.inputData = inputData; this.random = random;
+            docPath = document.PathName; folderPath = docPath.Remove(docPath.IndexOf('.'));
+        }
 
-            Dictionary<string, IDFFile.Building> modelBuildings = Utility.GetAverageBuildingFromMasses(doc, userData.numFloors, userData.pBuildingConstruction.GetAverage(),
-               userData.pWindowConstruction.GetAverage(), userData.pBuildingOperation.GetAverage() );
+        internal void RunAnalysis()
+        {
+            WriteIDF();
+            Utility.SimulateMultipleFile(new FileInfo(document.PathName).DirectoryName, inputData.epLoc, inputData.weatherLoc);
+            ReadEPResults();
+        }
 
-            foreach (KeyValuePair<string, IDFFile.Building> modelBuilding in modelBuildings)
+        private void ReadEPResults()
+        {
+            foreach (KeyValuePair<string, IDFFile.Building> bui in AvgBuildings)
+            {              
+                string baseCSV = string.Format("{0}/{1}_Results.csv", folderPath, bui.Key);
+                string[] baseResults = File.ReadAllLines(string.Format("{0}/{1}.csv", folderPath, bui.Key));
+                List<string> results = new List<string>() { baseResults[0], baseResults[1] };       
+                for (int i = 0; i< inputData.numSamples; i++)
+                {
+                    results.Add(File.ReadAllLines(string.Format("{0}/{1}_{2}.csv", folderPath, bui.Key, i))[1]);
+                }
+                File.WriteAllLines(baseCSV, results);
+                Dictionary<string, double[]> resultsDF = Utility.ConvertToDataframe(results);
+
+                
+            }
+        }
+
+        public void WriteIDF()
+        {
+            string folderPath = docPath.Remove(docPath.IndexOf('.'));
+
+            int nFloor = inputData.numFloors;
+            int nSamples = inputData.numSamples;
+
+            List<IDFFile.BuildingConstruction> constructions = Utility.GenerateRandomConstruction(inputData.pBuildingConstruction, inputData.numSamples, random);
+            List<IDFFile.WWR> WWRs = Utility.GenerateRandomWWR(inputData.pWindowConstruction, inputData.numSamples, random);
+            List<IDFFile.BuildingOperation> buildingOperations = Utility.GenerateRandomBuildingParameters(inputData.pBuildingOperation, inputData.numSamples, random);
+
+            GetAverageBuildingFromMasses(document, nFloor, inputData.pBuildingConstruction.GetAverage(),
+              inputData.pWindowConstruction.GetAverage(), inputData.pBuildingOperation.GetAverage());
+
+            foreach (KeyValuePair<string, IDFFile.Building> modelBuilding in AvgBuildings)
             {
                 IDFFile.IDFFile file = new IDFFile.IDFFile() { name = modelBuilding.Key, building = modelBuilding.Value };
                 string fullFileName = string.Format("{0}/{1}.idf", folderPath, modelBuilding.Key);
                 file.GenerateOutput(true, "Annual");
+
                 File.WriteAllLines(fullFileName, file.WriteFile());
 
-                for (int i=0; i<userData.numSamples; i++)
+                for (int i = 0; i < nSamples; i++)
                 {
                     file.building.UpdateBuildingConstructionWWROperations(constructions[i], WWRs[i], buildingOperations[i]);
                     fullFileName = string.Format("{0}/{1}_{2}.idf", folderPath, modelBuilding.Key, i.ToString());
                     File.WriteAllLines(fullFileName, file.WriteFile());
                 }
             }
-            return Result.Succeeded;
         }
-    }
-
-    public static class Utility
-    {
-        public static double FtToM(double value)
-        {
-            return (Math.Round(value * 0.3048, 5));
-        }
-        public static double SqFtToSqM(double value)
-        {
-            return (Math.Round(value * 0.092903, 5));
-        }      
-        public static XYZ ftToM(this XYZ point)
-        {
-            return new XYZ(FtToM(point.X), FtToM(point.Y), FtToM(point.Z));
-        }
-        public static Dictionary<string, IDFFile.Building> GetAverageBuildingFromMasses(Document doc, int nFloors, IDFFile.BuildingConstruction constructions,
+        public void GetAverageBuildingFromMasses(Document doc, int nFloors, IDFFile.BuildingConstruction constructions,
         IDFFile.WWR WWR, IDFFile.BuildingOperation buildingOperations )
         {
-            Dictionary<string, IDFFile.Building> buildings = new Dictionary<string, IDFFile.Building>();
+            AvgBuildings = new Dictionary<string, IDFFile.Building>();
 
             List<View3D> views = (new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()).Where(v => v.Name.Contains("Op - ")).ToList();
             foreach (View3D v1 in views)
@@ -116,12 +154,12 @@ namespace BIMToIDF
                                     //checks if it is indeed a wall by computing the normal with respect to 001                                   
                                     if (Math.Round(fNormal.Z, 3) == -1)
                                     {
-                                        groundPoints.AddRange(GetPoints(face1));
-                                        floorArea = SqFtToSqM(face1.Area);
+                                        groundPoints.AddRange(Utility.GetPoints(face1));
+                                        floorArea = Utility.SqFtToSqM(face1.Area);
                                     }
                                     if (Math.Round(fNormal.Z, 3) == 1)
                                     {
-                                        roofPoints.AddRange(GetPoints(face1));
+                                        roofPoints.AddRange(Utility.GetPoints(face1));
                                     }
                                 }                                                            
                             }
@@ -129,78 +167,8 @@ namespace BIMToIDF
                     }
                 }
                 IDFFile.Building building = InitialiseModelBuilding(groundPoints, roofPoints, floorArea, nFloors, constructions, WWR, buildingOperations );
-
-                buildings.Add(v1.Name.Remove(0, 4), building);
-            }
-            return buildings;
-        }
-        public static List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> GetAllWallEdges(List<IDFFile.XYZ> groundPoints)
-        {
-            List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> wallEdges = new List<Tuple<IDFFile.XYZ, IDFFile.XYZ>>();
-            for (int i = 0; i<groundPoints.Count; i++)
-            {
-                try
-                {
-                    wallEdges.Add(new Tuple<IDFFile.XYZ, IDFFile.XYZ>( groundPoints[i], groundPoints[i + 1]));
-                }
-                catch
-                {
-                    wallEdges.Add(new Tuple<IDFFile.XYZ, IDFFile.XYZ>(groundPoints[i], groundPoints[0]));
-                }
-            }
-            return wallEdges;
-        }     
-        public static List<IDFFile.BuildingConstruction> GenerateRandomConstruction(IDFFile.ProbabilisticBuildingConstruction pConstruction, int numsamples, Random r)
-        {
-            List<IDFFile.BuildingConstruction> constructions = new List<IDFFile.BuildingConstruction>();
-            for (int i = 0; i < numsamples; i++)
-            {
-                constructions.Add(new IDFFile.BuildingConstruction()
-                {
-                    uWall = GetRandom(pConstruction.uWall, r),
-                    uGFloor = GetRandom(pConstruction.uGFloor, r),
-                    uRoof = GetRandom(pConstruction.uRoof, r),
-                    uWindow = GetRandom(pConstruction.uWindow, r),
-                    gWindow = GetRandom(pConstruction.gWindow, r),
-                    uIWall = GetRandom(pConstruction.uIWall, r),
-                    uIFloor = GetRandom(pConstruction.uIFloor, r),
-                    hcSlab = GetRandom(pConstruction.hcSlab, r),
-                    infiltration = GetRandom(pConstruction.infiltration, r),
-                });              
-            }            
-            return constructions;
-        }
-        public static List<IDFFile.WWR> GenerateRandomWWR(IDFFile.ProbabilisticWWR pWWR, int numsamples, Random r)
-        {
-            List<IDFFile.WWR> WWRs = new List<IDFFile.WWR>();
-            for (int i = 0; i < numsamples; i++)
-            {
-                WWRs.Add(new IDFFile.WWR()
-                {
-                    east = GetRandom(pWWR.east, r),
-                    south = GetRandom(pWWR.south, r),
-                    north = GetRandom(pWWR.north, r),
-                    west = GetRandom(pWWR.west, r)                
-                });
-                
-            }
-            return WWRs;
-        }
-        public static List<IDFFile.BuildingOperation> GenerateRandomBuildingParameters(IDFFile.ProbabilisticBuildingOperation pOP, int numsamples, Random r)
-        {
-            List<IDFFile.BuildingOperation> bParameters = new List<IDFFile.BuildingOperation>();
-            for (int i = 0; i < numsamples; i++)
-            {
-                bParameters.Add(new IDFFile.BuildingOperation()
-                {
-                    internalHeatGain = GetRandom(pOP.internalHeatGain, r),
-                    operatingHours = GetRandom(pOP.operatingHours, r),
-                    boilerEfficiency = GetRandom(pOP.boilerEfficiency, r),
-                    chillerCOP = GetRandom(pOP.chillerCOP, r)
-                });
-
-            }
-            return bParameters;
+                AvgBuildings.Add(v1.Name.Remove(0, 5), building);
+            }          
         }
         public static IDFFile.Building InitialiseModelBuilding(List<IDFFile.XYZ> groundPoints, List<IDFFile.XYZ> roofPoints, double area, int nFloors,
             IDFFile.BuildingConstruction constuction, IDFFile.WWR wwr, IDFFile.BuildingOperation operation)
@@ -225,7 +193,7 @@ namespace BIMToIDF
             double roofZ = roofPoints.First().Z;
             double heightFl = (roofZ - baseZ) / nFloors;
 
-            IDFFile.XYZList dlPoints = GetDayLightPointsXYZList(groundPoints, GetAllWallEdges(groundPoints));
+            IDFFile.XYZList dlPoints = Utility.GetDayLightPointsXYZList(groundPoints, Utility.GetAllWallEdges(groundPoints));
             for (int i = 0; i < nFloors; i++)
             {
                 double floorZ = baseZ + i * heightFl;
@@ -259,11 +227,137 @@ namespace BIMToIDF
                 zoneList.listZones.Add(zone);
             }
             bui.AddZoneList(zoneList);
-
+            bui.CreateShadingControls();
             bui.GeneratePeopleLightingElectricEquipment();
             bui.GenerateInfiltraitionAndVentillation();
             bui.GenerateHVAC(true, false, false);
             return bui;
+        }
+        
+    }
+
+    public static class Utility
+    {
+        public static void IntegrateEnergyResults(Document doc, IDFFile.Building Bui, Dictionary<string, double[]> resultsDF)
+        {
+            Bui.AssociateProbabilisticEnergyPlusResults(resultsDF);
+
+        }
+        public static void SimulateMultipleFile(string path, string pathEP, string pathWeather)
+        {
+            int process = 0, required = 0, completed = 0, remaining = 0;
+            if (process == 0) { process = Math.Max(3, Environment.ProcessorCount - 2); }
+
+            string title = "Manav: Starting EnergyPlus Simulation from - " + path;
+            DateTime t1 = DateTime.Now;
+
+            //int width = Console.WindowWidth;
+            //int n1 = Convert.ToInt32(Math.Floor(.5 * (width - title.Count())));
+            //string x1 = new string('*', n1);
+            //Console.WriteLine(x1 + title + x1);
+            //Console.WriteLine("EnergyPlus Location: {0}", pathEP);
+            //Console.WriteLine("Weahter File: {0}", pathWeather);
+            //Console.WriteLine("Number of Parallel Simulation: {0}", process.ToString());
+            //Console.WriteLine(new string('=', Console.WindowWidth));
+            List<string> idfs = Directory.EnumerateFiles(path, "*.idf", SearchOption.AllDirectories).ToList();
+            
+            ParallelOptions options = new ParallelOptions() { MaxDegreeOfParallelism = process };
+            ParallelLoopResult pLS = Parallel.ForEach(idfs, options, f => SimulateFile(f, pathWeather, pathEP));
+
+            DateTime t2 = DateTime.Now;
+            //Console.Write("Completed Simulation from Folder: {0}\t\tTime Taken: {1}", path, (t2 - t1));
+        }
+        public static void SimulateFile(string file, string weatherFile, string locationEP)
+        {
+            Console.Write("\nSimulating File: {0}", file);
+            Process p = new Process();
+            p.StartInfo.FileName = "SimulateFile.exe";
+            p.StartInfo.Arguments = string.Join(" ", locationEP, file, weatherFile);
+            p.StartInfo.CreateNoWindow = true;
+            p.StartInfo.RedirectStandardOutput = true;
+            p.StartInfo.UseShellExecute = false;
+            p.Start();
+            p.WaitForExit();
+        }
+        public static double FtToM(double value)
+        {
+            return (Math.Round(value * 0.3048, 5));
+        }
+        public static double SqFtToSqM(double value)
+        {
+            return (Math.Round(value * 0.092903, 5));
+        }
+        public static XYZ ftToM(this XYZ point)
+        {
+            return new XYZ(FtToM(point.X), FtToM(point.Y), FtToM(point.Z));
+        }
+        public static List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> GetAllWallEdges(List<IDFFile.XYZ> groundPoints)
+        {
+            List<Tuple<IDFFile.XYZ, IDFFile.XYZ>> wallEdges = new List<Tuple<IDFFile.XYZ, IDFFile.XYZ>>();
+            for (int i = 0; i < groundPoints.Count; i++)
+            {
+                try
+                {
+                    wallEdges.Add(new Tuple<IDFFile.XYZ, IDFFile.XYZ>(groundPoints[i], groundPoints[i + 1]));
+                }
+                catch
+                {
+                    wallEdges.Add(new Tuple<IDFFile.XYZ, IDFFile.XYZ>(groundPoints[i], groundPoints[0]));
+                }
+            }
+            return wallEdges;
+        }
+        public static List<IDFFile.BuildingConstruction> GenerateRandomConstruction(IDFFile.ProbabilisticBuildingConstruction pConstruction, int numsamples, Random r)
+        {
+            List<IDFFile.BuildingConstruction> constructions = new List<IDFFile.BuildingConstruction>();
+            for (int i = 0; i < numsamples; i++)
+            {
+                constructions.Add(new IDFFile.BuildingConstruction()
+                {
+                    uWall = GetRandom(pConstruction.uWall, r),
+                    uGFloor = GetRandom(pConstruction.uGFloor, r),
+                    uRoof = GetRandom(pConstruction.uRoof, r),
+                    uWindow = GetRandom(pConstruction.uWindow, r),
+                    gWindow = GetRandom(pConstruction.gWindow, r),
+                    uIWall = GetRandom(pConstruction.uIWall, r),
+                    uIFloor = GetRandom(pConstruction.uIFloor, r),
+                    hcSlab = GetRandom(pConstruction.hcSlab, r),
+                    infiltration = GetRandom(pConstruction.infiltration, r),
+                });
+            }
+            return constructions;
+        }
+        public static List<IDFFile.WWR> GenerateRandomWWR(IDFFile.ProbabilisticWWR pWWR, int numsamples, Random r)
+        {
+            List<IDFFile.WWR> WWRs = new List<IDFFile.WWR>();
+            for (int i = 0; i < numsamples; i++)
+            {
+                WWRs.Add(new IDFFile.WWR()
+                {
+                    east = GetRandom(pWWR.east, r),
+                    south = GetRandom(pWWR.south, r),
+                    north = GetRandom(pWWR.north, r),
+                    west = GetRandom(pWWR.west, r)
+                });
+
+            }
+            return WWRs;
+        }
+        public static List<IDFFile.BuildingOperation> GenerateRandomBuildingParameters(IDFFile.ProbabilisticBuildingOperation pOP, int numsamples, Random r)
+        {
+            List<IDFFile.BuildingOperation> bParameters = new List<IDFFile.BuildingOperation>();
+            for (int i = 0; i < numsamples; i++)
+            {
+                bParameters.Add(new IDFFile.BuildingOperation()
+                {
+                    internalHeatGain = GetRandom(pOP.internalHeatGain, r),
+                    operatingHours = GetRandom(pOP.operatingHours, r),
+                    boilerEfficiency = GetRandom(pOP.boilerEfficiency, r),
+                    chillerCOP = GetRandom(pOP.chillerCOP, r)
+                });
+
+            }
+            return bParameters;
         }
         public static List<IDFFile.XYZ> GetPoints(Face face)
         {
@@ -284,7 +378,7 @@ namespace BIMToIDF
         {
             return new IDFFile.XYZ()
             {
-                X = points.Select(p=>p.X).Average(),
+                X = points.Select(p => p.X).Average(),
                 Y = points.Select(p => p.Y).Average(),
                 Z = points.Select(p => p.Z).Average(),
             };
@@ -297,7 +391,7 @@ namespace BIMToIDF
             PointNumbers[PointNumbers.Length - 1] = 0;
             List<IDFFile.XYZ> CentersOfMass = new List<IDFFile.XYZ>();
 
-            for (int i= 0; i<AllPoints.Count(); i++)
+            for (int i = 0; i < AllPoints.Count(); i++)
             {
                 IDFFile.XYZ pointCM = new IDFFile.XYZ();
                 try
@@ -348,16 +442,7 @@ namespace BIMToIDF
         public static IDFFile.XYZ ConvertToIDF(this XYZ point)
         {
             return new IDFFile.XYZ(point.X, point.Y, point.Z);
-        }
-        public class BuildingDesignParameters
-        {
-            public double Length, Width, Height, rLenA, rWidA, BasementDepth, Orientation,
-                uWall, uGFloor, uRoof, hcSlab, uWindow, gWindow, uIWall, uIFloor,
-                infiltration, hours, lhg, ehg, LEHG,
-                beff, cCOP;
-            public IDFFile.WWR wwr;
-            public BuildingDesignParameters() { }
-        }
+        }       
         public static T DeepClone<T>(T obj)
         {
             using (var ms = new MemoryStream())
@@ -371,6 +456,28 @@ namespace BIMToIDF
         public static double GetRandom(double[] range, Random r)
         {
             return range[0] + ((range[1] - range[0]) * r.NextDouble());
+        }
+        public static Dictionary<string, double[]> ConvertToDataframe(IEnumerable<string> csvFile)
+        {
+            IEnumerable<string> header = csvFile.ElementAt(0).Split(',').Skip(1);
+            Dictionary<string, double[]> data = new Dictionary<string, double[]>();
+
+            for (int i = 0; i < header.Count(); i++)
+            {
+                data.Add(header.ElementAt(i), new double[csvFile.Count()-1]);
+            }
+
+            int r = 0;
+            foreach (string s in csvFile.Skip(1))
+            {
+                string[] row = s.Split(',').Skip(1).ToArray();
+                for (int c = 0; c<header.Count(); c++)
+                {
+                    data.ElementAt(c).Value[r] = double.Parse(row[c]);
+                }
+                r++;
+            }
+            return data;
         }
     }
 }
