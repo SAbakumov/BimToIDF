@@ -46,7 +46,7 @@ namespace BIMToIDF
             switch (userData.simulationType)
             {
                 case "Simplified EnergyPlus Simulation":
-                    new SimplifiedEP(doc, userData, r).RunAnalysis();
+                    new SimplifiedEP(uidoc, doc, userData, r);
                 break;
             }
            
@@ -56,22 +56,27 @@ namespace BIMToIDF
 
     public class SimplifiedEP
     {
+        UIDocument uiDocument;
         Document document;
         InputData inputData;
         Random random;
         string docPath, folderPath;
         Dictionary<string, IDFFile.Building> AvgBuildings;
-        public SimplifiedEP(Document document, InputData inputData, Random random)
+        Dictionary<string, Element> masses;
+        public SimplifiedEP(UIDocument uidoc, Document document, InputData inputData, Random random)
         {
+            this.uiDocument = uidoc;
             this.document = document; this.inputData = inputData; this.random = random;
             docPath = document.PathName; folderPath = docPath.Remove(docPath.IndexOf('.'));
+            RunAnalysis();
         }
 
         internal void RunAnalysis()
         {
-            WriteIDF();
-            Utility.SimulateMultipleFile(new FileInfo(document.PathName).DirectoryName, inputData.epLoc, inputData.weatherLoc);
+            //WriteIDF();
+            //Utility.SimulateMultipleFile(new FileInfo(document.PathName).DirectoryName, inputData.epLoc, inputData.weatherLoc);
             ReadEPResults();
+            
         }
 
         private void ReadEPResults()
@@ -88,7 +93,7 @@ namespace BIMToIDF
                 File.WriteAllLines(baseCSV, results);
                 Dictionary<string, double[]> resultsDF = Utility.ConvertToDataframe(results);
 
-                
+                Utility.IntegrateEnergyResults(uiDocument, document, bui.Value, bui.Key, resultsDF, masses);
             }
         }
 
@@ -104,7 +109,7 @@ namespace BIMToIDF
             List<IDFFile.BuildingOperation> buildingOperations = Utility.GenerateRandomBuildingParameters(inputData.pBuildingOperation, inputData.numSamples, random);
 
             GetAverageBuildingFromMasses(document, nFloor, inputData.pBuildingConstruction.GetAverage(),
-              inputData.pWindowConstruction.GetAverage(), inputData.pBuildingOperation.GetAverage());
+              inputData.pWindowConstruction.GetAverage(), inputData.pBuildingOperation.GetAverage(),out masses);
 
             foreach (KeyValuePair<string, IDFFile.Building> modelBuilding in AvgBuildings)
             {
@@ -123,19 +128,19 @@ namespace BIMToIDF
             }
         }
         public void GetAverageBuildingFromMasses(Document doc, int nFloors, IDFFile.BuildingConstruction constructions,
-        IDFFile.WWR WWR, IDFFile.BuildingOperation buildingOperations )
+        IDFFile.WWR WWR, IDFFile.BuildingOperation buildingOperations, out Dictionary<string, Element>  masses )
         {
             AvgBuildings = new Dictionary<string, IDFFile.Building>();
-
+            masses = new Dictionary<string, Element>();
             List<View3D> views = (new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()).Where(v => v.Name.Contains("Op - ")).ToList();
             foreach (View3D v1 in views)
             {
                 //Initialize building elements
-                FilteredElementCollector masses = new FilteredElementCollector(doc, v1.Id).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_Mass);
+                FilteredElementCollector massElement = new FilteredElementCollector(doc, v1.Id).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_Mass);
                 List<IDFFile.XYZ> groundPoints = new List<IDFFile.XYZ>();
                 List<IDFFile.XYZ> roofPoints = new List<IDFFile.XYZ>();
                 double floorArea = 0;
-                foreach (Element mass in masses)
+                foreach (Element mass in massElement)
                 {
                     Options op = new Options() { ComputeReferences = true };
                     GeometryElement gElement = mass.get_Geometry(op);
@@ -165,9 +170,11 @@ namespace BIMToIDF
                             }
                         }
                     }
+                    masses.Add(v1.Name.Remove(0, 5), mass);
                 }
                 IDFFile.Building building = InitialiseModelBuilding(groundPoints, roofPoints, floorArea, nFloors, constructions, WWR, buildingOperations );
                 AvgBuildings.Add(v1.Name.Remove(0, 5), building);
+                
             }          
         }
         public static IDFFile.Building InitialiseModelBuilding(List<IDFFile.XYZ> groundPoints, List<IDFFile.XYZ> roofPoints, double area, int nFloors,
@@ -235,13 +242,28 @@ namespace BIMToIDF
         }
         
     }
-
     public static class Utility
     {
-        public static void IntegrateEnergyResults(Document doc, IDFFile.Building Bui, Dictionary<string, double[]> resultsDF)
+        public static void IntegrateEnergyResults(UIDocument uidoc, Document doc, IDFFile.Building Bui, string massName, Dictionary<string, double[]> resultsDF, Dictionary<string, Element> masses)
         {
             Bui.AssociateProbabilisticEnergyPlusResults(resultsDF);
+            View3D v1 = (new FilteredElementCollector(doc).OfClass(typeof(View3D)).Cast<View3D>()).First(v => v.Name.Contains("Op - "+massName));
 
+            using (Transaction tx = new Transaction(doc, "Simplified EP"))
+            {
+                uidoc.ActiveView = v1;
+                tx.Start();            
+                View3D v2 = View3D.CreateIsometric(doc, v1.GetTypeId());
+                v2.Name = "SimplifiedEP-" + massName;
+                IEnumerable<Element> allElements = new FilteredElementCollector(doc).WhereElementIsNotElementType().OfCategory(BuiltInCategory.OST_Mass);
+                allElements = allElements.Concat(new FilteredElementCollector(doc).WherePasses(new ElementClassFilter(typeof(CurveElement))));
+                v2.HideElements(allElements.Select(e=>e.Id).ToList());
+                v2.UnhideElements(new List<ElementId>() { masses[massName].Id });
+                tx.Commit();
+
+                uidoc.ActiveView = v2;
+                
+            }
         }
         public static void SimulateMultipleFile(string path, string pathEP, string pathWeather)
         {

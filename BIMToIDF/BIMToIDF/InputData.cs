@@ -30,6 +30,7 @@ namespace BIMToIDF
         {
             InitializeComponent();
             weLoc.Text = docLocation + "/Munich.epw";
+            comboBox1.SelectedIndex = 1;
         }
 
         private void button1_Click(object sender, EventArgs e)
